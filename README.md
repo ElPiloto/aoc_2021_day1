@@ -12,7 +12,7 @@ This has low inductive bias, but has long-range dependencies (the input data is 
 
 We split our solutions into various approaches, ordered roughly from strong to weak inductive biases in our model:
 - __pairwise__: instead of treating the data as a list, we get the model to classify pairs of data points as higher or lower.
-  - __pairwise_and_sum_: We can then sum that output directly to produce our final answer, which is obviously exploiting knowledge of the solution.
+  - __pairwise_and_sum__: We can then sum that output directly to produce our final answer, which is obviously exploiting knowledge of the solution.
   - __pairwise_and_count__: Or we can feed the output of the pairwise model into a counting sequence model.
 
 - __sequential__: this takes in a variable-length list of numbers and produces the final answer to the problem.  
