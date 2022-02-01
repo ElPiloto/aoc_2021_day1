@@ -32,25 +32,30 @@ wandb.init(
     entity='elpiloto',
 )
 
+
 def get_config():
   # Common config to all jaxline experiments.
   config = base_config.get_base_config()
-  config.training_steps = 2000
+  config.training_steps = 1000
   config.checkpoint_dir = './checkpoints/'
   # Needed because jaxline version from pypi is broken and version from github
   # breaks everything else.
   config.train_checkpoint_all_hosts = False
+  config.interval_type = 'steps'
 
   # Not common to jaxline
   exp = config.experiment_kwargs = ml_collections.ConfigDict()
-  exp.train_seed = 102387
-  exp.eval_seed = 5986
-  exp.learning_rate = 5e-3
+  exp.train_seed = 107992
+  exp.eval_seed = 8801
+  # 5e-3 .005 vs 1e-3 .001
+  exp.learning_rate = 4e-5
   exp.batch_size = 256
   exp.data_config = ml_collections.ConfigDict()
   train = exp.data_config.train = ml_collections.ConfigDict()
   train.min = 100
   train.max = 1000
+  train.rng_type = 'nearby'
+  #train.rng_type = 'independent'
 
   eval = exp.data_config.eval = ml_collections.ConfigDict()
   eval.name = ["eval"]
@@ -73,6 +78,11 @@ def cross_entropy_loss(params, model, inputs, targets):
 
 class Experiment(experiment.AbstractExperiment):
 
+  NON_BROADCAST_CHECKPOINT_ATTRS = {
+       '_params': '_params',
+       '_opt_state': '_opt_state',
+  }
+
   def __init__(self,
                 mode: str,
                 train_seed: int,
@@ -88,12 +98,14 @@ class Experiment(experiment.AbstractExperiment):
       self._learning_rate = learning_rate
       self._data_config = data_config
       self._batch_size = batch_size
+      self._config = get_config()
       logging.log(logging.INFO, f'Launched experiment with mode = {mode}')
 
       # This should really be "train_and_evaluate"
       if mode == 'train':
         self._train_data = self._build_train_data()
         self._eval_datasets = self._build_eval_datasets()
+        self._final_eval_data = self._build_final_eval_data()
 
         train_inputs, _ = next(self._train_data)
 
@@ -126,8 +138,13 @@ class Experiment(experiment.AbstractExperiment):
 
   def _build_train_data(self):
     """Initializes training data."""
-    synthetic_generator = dataset.SyntheticPairsGenerator(
-        min_value=100, max_value=1000, rng_seed=self._train_seed)
+    ds_config = self._data_config['train']
+    if ds_config.rng_type == 'nearby':
+      synthetic_generator = dataset.NearbySyntheticPairsGenerator(
+          min_value=ds_config.min, max_value=ds_config.max, rng_seed=self._train_seed)
+    elif ds_config.rng_type == 'independent':
+      synthetic_generator = dataset.SyntheticPairsGenerator(
+          min_value=ds_config.min, max_value=ds_config.max, rng_seed=self._train_seed)
     ds = dataset.BatchDataset(synthetic_generator.generator())
     batch_iterator = ds(batch_size=256).as_numpy_iterator()
     return batch_iterator
@@ -148,6 +165,15 @@ class Experiment(experiment.AbstractExperiment):
       batch_iterator = ds(batch_size=self._batch_size).as_numpy_iterator()
       datasets[name] = batch_iterator
     return datasets
+
+
+  def _build_final_eval_data(self):
+    """Initializes training data."""
+    aoc_input_generator = dataset.AOCInputFilePairsGenerator(rng_seed=self._train_seed)
+    ds = dataset.BatchDataset(aoc_input_generator.generator())
+    batch_iterator = ds(batch_size=200).as_numpy_iterator()
+    return batch_iterator
+
 
   def _initialize_model(self):
     """Initializes our model."""
@@ -171,15 +197,26 @@ class Experiment(experiment.AbstractExperiment):
 
     print(f'Loss: {loss:.3f}')
     scalars = {'loss': loss}
+    should_log = False
 
     if global_step % 50 == 0:
       eval_scalars = self.evaluate(global_step=global_step, rng=rng, writer=writer)
       scalars.update(eval_scalars)
       print(eval_scalars)
+      should_log = True
+
+    if global_step == self._config.training_steps - 1:
+      print('================ Final step of training =====================.')
+      final_eval_scalars = self.final_evaluation(global_step=global_step, rng=rng, writer=writer)
+      scalars.update(final_eval_scalars)
+      should_log = True
+
+    if should_log:
       wandb.log(scalars)
 
     if writer is not None:
       writer.write_scalars(global_step, scalars)
+
     return scalars
 
   def evaluate(self, *, global_step: jnp.ndarray, rng: jnp.ndarray, writer:
@@ -195,6 +232,24 @@ class Experiment(experiment.AbstractExperiment):
       accuracy = accuracy_score(targets, predicted)
       eval_scalars[f'{ds_name}_accuracy'] = accuracy
     return eval_scalars
+
+  def final_evaluation(self, *, global_step: jnp.ndarray, rng: jnp.ndarray,
+      writer: Optional[jl_utils.Writer]) -> Dict[str, int]:
+    del global_step, rng, writer
+    accuracies = []
+    running_count = 0
+    i = 0
+    for inputs, targets in self._final_eval_data:
+      logits = self._model.apply(self._params, inputs)
+      predicted = jnp.argmax(logits, axis=-1)
+      running_count += jnp.sum(predicted)
+      accuracy = accuracy_score(targets, predicted)
+      accuracies.append(accuracy)
+      i += 1
+    average_accuracy = np.mean(accuracies)
+    print(f'Count: {running_count}, Accuracy: {average_accuracy}, Accuracies: {accuracies}')
+    return {'count': running_count, 'final_eval_accuracy': average_accuracy}
+
 
 
 if __name__ == '__main__':
