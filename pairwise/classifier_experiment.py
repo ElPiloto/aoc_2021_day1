@@ -27,7 +27,7 @@ tf.config.set_visible_devices([], 'GPU')
 FLAGS = flags.FLAGS
 
 jax.config.update('jax_platform_name', 'gpu')
-wandb.init(
+run = wandb.init(
     project='aoc_2021_day1_pairwise_classifier',
     entity='elpiloto',
 )
@@ -63,7 +63,7 @@ def get_config():
   eval.max = [1000,]
 
 
-  wandb.config = exp.to_dict()
+  wandb.config.update(exp.to_dict())
   # exp.name = 'Classifier Experiment.':
   return config
 
