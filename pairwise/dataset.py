@@ -1,5 +1,5 @@
 import abc
-from typing import Generator, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import tensorflow as tf
@@ -36,6 +36,35 @@ class AOCInputFilePairsGenerator(PairsGenerator):
         yield values, label
     return _generator
 
+
+class TrainingAOCInputFilePairsGenerator(PairsGenerator):
+  """Generates in pairs data from AoC input file for training."""
+
+  def __init__(self, only_n_pairs: Optional[int] = -1, input_file: Optional[str] = AOC_INPUT_FILE, rng_seed: Optional[int] = None):
+    self._input_file = input_file
+    self.rng_state = np.random.RandomState(rng_seed)
+    self._list = np.loadtxt(self._input_file)
+    self._num_pairs = len(self._list) - 1
+    if only_n_pairs > 0:
+      # make sure we don't only get the first two values
+      np.random.shuffle(self._list)
+      self._num_pairs = only_n_pairs
+    self._mean = np.mean(self._list)
+    self._std = np.std(self._list)
+    self._normalize = lambda x: (x - self._mean)/(self._std)
+    self._normalize = lambda x: x
+
+
+  def generator(self):
+    def _generator():
+      while True:
+        current_idx = np.random.randint(0, self._num_pairs - 1)
+        values = self._list[current_idx:current_idx+2]
+        values = values.astype(np.float32)
+        values = self._normalize(values)
+        label = np.uint8(values[1] > values[0])
+        yield values, label
+    return _generator
 
 
 class SyntheticPairsGenerator(PairsGenerator):
@@ -133,4 +162,24 @@ if False:
   for i in range(10):
     print(next(batch_iterator))
   __import__('pdb').set_trace()
+
+
+if False:
+  def integration():
+    aoc_gen = TrainingAOCInputFilePairsGenerator()
+    ds = BatchDataset(aoc_gen.generator())
+    return ds
+
+  ds = integration()
+  batch_iterator = ds(batch_size=10).as_numpy_iterator()
+  i = 0
+  for i in range(10):
+    print(next(batch_iterator))
+
+if False:
+  synthetic_generator = NearbySyntheticPairsGenerator(100, 1000)
+  gen = synthetic_generator.generator()
+  for (x1, x2), _ in gen():
+    print(x2 - x1)
+
 
