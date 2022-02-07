@@ -47,7 +47,7 @@ class TrainingAOCInputFilePairsGenerator(PairsGenerator):
     self._num_pairs = len(self._list) - 1
     if only_n_pairs > 0:
       # make sure we don't only get the first two values
-      np.random.shuffle(self._list)
+      self.rng_state.shuffle(self._list)
       self._num_pairs = only_n_pairs
     self._mean = np.mean(self._list)
     self._std = np.std(self._list)
@@ -58,7 +58,7 @@ class TrainingAOCInputFilePairsGenerator(PairsGenerator):
   def generator(self):
     def _generator():
       while True:
-        current_idx = np.random.randint(0, self._num_pairs - 1)
+        current_idx = self.rng_state.randint(0, self._num_pairs - 1)
         values = self._list[current_idx:current_idx+2]
         values = values.astype(np.float32)
         values = self._normalize(values)
@@ -97,7 +97,7 @@ class NearbySyntheticPairsGenerator(SyntheticPairsGenerator):
       while True:
         value = self.rng_state.randint(low = self.min_value, high = self.max_value, size=(1)
         ).astype(np.float32)
-        offset = np.random.normal(loc=0., scale=10., size=1)
+        offset = self.rng_state.normal(loc=0., scale=10., size=1)
         offset = np.round(offset)
         values = np.array([value, value+offset])
         values = np.clip(values, self.min_value, self.max_value)

@@ -65,6 +65,7 @@ def get_config():
 
   model = exp.model = ml_collections.ConfigDict()
   model.output_sizes = [128, 128, 2]
+  model.activation_fn = 'relu'
   wandb.config.update(exp.to_dict())
   return config
 
@@ -121,11 +122,11 @@ class Experiment(experiment.AbstractExperiment):
         self._model = hk.without_apply_rng(hk.transform(model))
         self._params = self._model.init(init_rng, inputs=jnp.zeros_like(train_inputs))
 
-        # We put this in a optax schedule just for easy logging.
-        self._sched = sched
         sched = optax.piecewise_constant_schedule(
             self._learning_rate, {10: self._learning_rate}
         )
+        # We put this in a optax schedule just for easy logging.
+        self._sched = sched
         opt = optax.adam(learning_rate=sched)
         self._opt_state = opt.init(self._params)
         # Example output, I just like to keep this.
@@ -191,11 +192,17 @@ class Experiment(experiment.AbstractExperiment):
 
   def _initialize_model(self):
     """Initializes our model."""
+    activation = self._config.experiment_kwargs.model.activation_fn
+    try:
+      activation_fn = getattr(jax.nn, activation)
+    except:
+      raise ValueError(f'Unknown activation function: {activation}')
+
     def forward(inputs):
       output = hk.nets.MLP(
           output_sizes=self._config.experiment_kwargs.model.output_sizes,
           activate_final=False,
-          activation=jax.nn.relu,
+          activation=activation_fn,
           )(inputs)
       return output
 
